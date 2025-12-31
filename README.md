@@ -83,28 +83,27 @@ NVIDIA GPU (Tested on RTX 3050 – 6GB VRAM)
 
 ## ⚙️ Installation & Setup
 ### 1️⃣ Clone the Repository
-git clone <your-repo-url>
-cd IOT_Project
+``git clone <your-repo-url>
+cd IOT_Project``
 
 ### 2️⃣ Create Virtual Environment (Recommended)
 python -m venv venv
 venv\Scripts\activate
 
-###3️⃣ Install CUDA-Enabled PyTorch (IMPORTANT)
+### 3️⃣ Install CUDA-Enabled PyTorch (IMPORTANT)
 
 ⚠️ PyTorch with CUDA must be installed separately.
 
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+``pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118``
 
 ### 4️⃣ Install Remaining Dependencies
-pip install -r requirements.txt
+``pip install -r requirements.txt``
 
 ### 5️⃣ Verify GPU Availability
-python
-
+`` python
 import torch
 print(torch.cuda.is_available())
-print(torch.cuda.get_device_name(0))
+print(torch.cuda.get_device_name(0)) ``
 
 
 Expected output:
@@ -119,29 +118,29 @@ uvicorn main:app
 
 Server will run at:
 
-http://127.0.0.1:8000
+``http://127.0.0.1:8000``
 
 ## 🧪 API Testing (Swagger UI)
 
 ### Open your browser:
 
-http://127.0.0.1:8000/docs
+``http://127.0.0.1:8000/docs``
 
 ### Test Endpoint: /chat
 
 Request Body
-
+``
 {
   "user_message": "I'm exhausted and it's cold today"
 }
-
+``
 
 Sample Response
-
+``
 {
   "reply": "You seem tired and cold. A hot spicy ramen would be perfect for you 🍜"
 }
-
+``
 ##🤖 AI Design Approach
 
 Uses a lightweight LLM suitable for limited VRAM
