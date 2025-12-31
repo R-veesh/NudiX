@@ -40,15 +40,20 @@ Cheese Noodles – Exhausted / comfort food
 Veg Clear Soup – Light meal / low appetite
 
 ## 🧠 System Architecture (High Level)
--User (Mobile / Web App)
+
+ User (Mobile / Web App)
         ↓
--   FastAPI Backend
+        
+   FastAPI Backend
         ↓
--  Agentic AI (LLM)
+        
+  Agentic AI (LLM)
         ↓
--Noodle Recommendation
+        
+ Noodle Recommendation
         ↓
--IoT Vending Machine (Future Integration)
+        
+ IoT Vending Machine (Future Integration)
 
 ## 🛠️ Technology Stack
 Backend
@@ -74,21 +79,23 @@ Hardware
 NVIDIA GPU (Tested on RTX 3050 – 6GB VRAM)
 
 ## 📦 Project Structure
-``-IOT_Project/
--│
--├── main.py            # FastAPI application
--├── ai_model.py        # AI model loading & inference
--├── requirements.txt   # Python dependencies
--├── README.md          # Project documentation ``
+- IOT_Project/
+- │
+- ├── main.py            # FastAPI application
+- ├── ai_model.py        # AI model loading & inference
+- ├── requirements.txt   # Python dependencies
+- ├── README.md          # Project documentation 
 
 ## ⚙️ Installation & Setup
 ### 1️⃣ Clone the Repository
-``-git clone <your-repo-url>
--cd IOT_Project``
+
+``git clone <your-repo-url>
+cd IOT_Project``
 
 ### 2️⃣ Create Virtual Environment (Recommended)
+
 `` -python -m venv venv
--venv\Scripts\activate ``
+venv\Scripts\activate ``
 
 ### 3️⃣ Install CUDA-Enabled PyTorch (IMPORTANT)
 
@@ -97,13 +104,15 @@ NVIDIA GPU (Tested on RTX 3050 – 6GB VRAM)
 ``pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118``
 
 ### 4️⃣ Install Remaining Dependencies
+
 ``pip install -r requirements.txt``
 
 ### 5️⃣ Verify GPU Availability
-`` -python
--import torch
--print(torch.cuda.is_available())
--print(torch.cuda.get_device_name(0)) ``
+
+`` python
+import torch
+print(torch.cuda.is_available())
+print(torch.cuda.get_device_name(0)) ``
 
 
 Expected output:
@@ -113,8 +122,8 @@ NVIDIA GeForce RTX 3050(your)
 
 ## 🚀 Running the Application
 Start FastAPI Server
-uvicorn main:app
 
+``uvicorn main:app``
 
 Server will run at:
 
@@ -129,18 +138,21 @@ Server will run at:
 ### Test Endpoint: /chat
 
 Request Body
+
 ``
--{
+{
   "user_message": "I'm exhausted and it's cold today"
--}
+}
 ``
 
 Sample Response
+
 ``
--{
+{
   "reply": "You seem tired and cold. A hot spicy ramen would be perfect for you 🍜"
--}
+}
 ``
+
 ##🤖 AI Design Approach
 
 Uses a lightweight LLM suitable for limited VRAM
