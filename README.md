@@ -1,5 +1,6 @@
-#🍜 Smart Noodle Vending Machine – Agentic AI Backend
-##📌 Project Overview
+# 🍜 Smart Noodle Vending Machine – Agentic AI Backend
+
+## 📌 Project Overview
 
 This project implements an Agentic AI backend for a Smart IoT-based Noodle Vending Machine.
 The AI agent interacts with users through a mobile or web interface, understands their mood, situation, or intent, and intelligently recommends one of four available noodle flavors.
@@ -10,7 +11,7 @@ The IoT hardware vending machine is developed separately
 
 This repository focuses on the AI-powered backend and API layer
 
-##🎯 Key Features
+## 🎯 Key Features
 
 🤖 Agentic AI using Hugging Face LLM (Phi-2 / TinyLlama)
 
@@ -28,7 +29,7 @@ This repository focuses on the AI-powered backend and API layer
 
 🍜 Available Noodle Options
 
-##The AI agent recommends only one of the following:
+## The AI agent recommends only one of the following:
 
 Hot Spicy Ramen – Cold weather / strong hunger
 
@@ -38,7 +39,7 @@ Cheese Noodles – Exhausted / comfort food
 
 Veg Clear Soup – Light meal / low appetite
 
-##🧠 System Architecture (High Level)
+## 🧠 System Architecture (High Level)
 User (Mobile / Web App)
         ↓
    FastAPI Backend
@@ -49,7 +50,7 @@ Noodle Recommendation
         ↓
  IoT Vending Machine (Future Integration)
 
-##🛠️ Technology Stack
+## 🛠️ Technology Stack
 Backend
 
 Python 3.10
@@ -72,7 +73,7 @@ Hardware
 
 NVIDIA GPU (Tested on RTX 3050 – 6GB VRAM)
 
-##📦 Project Structure
+## 📦 Project Structure
 IOT_Project/
 │
 ├── main.py            # FastAPI application
@@ -80,12 +81,12 @@ IOT_Project/
 ├── requirements.txt   # Python dependencies
 ├── README.md          # Project documentation
 
-##⚙️ Installation & Setup
-###1️⃣ Clone the Repository
+## ⚙️ Installation & Setup
+### 1️⃣ Clone the Repository
 git clone <your-repo-url>
 cd IOT_Project
 
-###2️⃣ Create Virtual Environment (Recommended)
+### 2️⃣ Create Virtual Environment (Recommended)
 python -m venv venv
 venv\Scripts\activate
 
@@ -95,10 +96,10 @@ venv\Scripts\activate
 
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-###4️⃣ Install Remaining Dependencies
+### 4️⃣ Install Remaining Dependencies
 pip install -r requirements.txt
 
-###5️⃣ Verify GPU Availability
+### 5️⃣ Verify GPU Availability
 python
 
 import torch
@@ -111,7 +112,7 @@ Expected output:
 True
 NVIDIA GeForce RTX 3050(your)
 
-##🚀 Running the Application
+## 🚀 Running the Application
 Start FastAPI Server
 uvicorn main:app
 
@@ -120,13 +121,13 @@ Server will run at:
 
 http://127.0.0.1:8000
 
-##🧪 API Testing (Swagger UI)
+## 🧪 API Testing (Swagger UI)
 
-###Open your browser:
+### Open your browser:
 
 http://127.0.0.1:8000/docs
 
-###Test Endpoint: /chat
+### Test Endpoint: /chat
 
 Request Body
 
@@ -151,7 +152,7 @@ Combines agent logic + natural language understanding
 
 Designed for future IoT availability checks
 
-##🔮 Future Enhancements
+## 🔮 Future Enhancements
 
 🔗 Real-time IoT inventory & availability check
 
@@ -165,7 +166,7 @@ Designed for future IoT availability checks
 
 📄 Academic Note
 
-##This project demonstrates:
+## This project demonstrates:
 
 Practical use of Agentic AI
 
@@ -175,7 +176,7 @@ Clean API design with FastAPI
 
 Industry-standard dependency management
 
-##👨‍💻 Author
+## 👨‍💻 Author
 
 Raveesha
 Software Engineering Student
