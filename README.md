@@ -74,12 +74,12 @@ Hardware
 NVIDIA GPU (Tested on RTX 3050 – 6GB VRAM)
 
 ## 📦 Project Structure
-IOT_Project/
+``IOT_Project/
 │
 ├── main.py            # FastAPI application
 ├── ai_model.py        # AI model loading & inference
 ├── requirements.txt   # Python dependencies
-├── README.md          # Project documentation
+├── README.md          # Project documentation ``
 
 ## ⚙️ Installation & Setup
 ### 1️⃣ Clone the Repository
