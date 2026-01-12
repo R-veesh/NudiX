@@ -1,0 +1,5 @@
+external_temp,body_temp,heart_rate,label
+35,36.8,82,no_cooling
+36,37.1,95,no_cooling
+38,38.5,115,cooling_needed
+40,39.2,130,cooling_needed
