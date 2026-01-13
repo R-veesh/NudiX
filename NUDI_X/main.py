@@ -11,10 +11,6 @@ from ai_model import get_ai_reply
 
 app = FastAPI(title="Noodle AI Agent")
 
-# @app.on_event("startup")
-# def startup_event():
-#     load_model()  # preload model
-
 # Allow requests from your frontend
 origins = [
     "http://localhost",
@@ -23,7 +19,7 @@ origins = [
 ]
 
 app.add_middleware(
-    CORSMiddleware,
+    CORSMiddleware, 
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],  # allow POST, OPTIONS, etc.
