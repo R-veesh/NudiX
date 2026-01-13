@@ -1,22 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- how to run this  -->
-  <!-- python -m http.server 5500 -->
-  <!-- open http://localhost:5500/index.html -->
   <meta charset="UTF-8">
   <title>Smart Noodle AI</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
   <div class="chat-container">
     <div class="header">🍜 Smart Noodle AI</div>
+
     <div id="chatBox"></div>
+
     <div class="input-area">
       <input id="userInput" placeholder="Type your order..." />
-      <button onclick="sendMessage()">Send</button>
+      <button id="sendBtn">Send</button>
     </div>
   </div>
+
+  <!-- JS MUST be loaded at the end -->
   <script src="app.js"></script>
 </body>
 </html>

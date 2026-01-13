@@ -11,6 +11,10 @@ from ai_model import get_ai_reply
 
 app = FastAPI(title="Noodle AI Agent")
 
+# @app.on_event("startup")
+# def startup_event():
+#     load_model()  # preload model
+
 # Allow requests from your frontend
 origins = [
     "http://localhost",
@@ -33,3 +37,4 @@ class ChatRequest(BaseModel):
 def chat_agent(req: ChatRequest):
     reply = get_ai_reply(req.user_message)
     return {"reply": reply}
+
