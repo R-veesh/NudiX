@@ -1,16 +1,16 @@
-// esp32_main.ino (FIXED VERSION)
+// esp32_main.ino (CORRECTED PIN ASSIGNMENTS)
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Stepper.h>
 
 // Define LED_BUILTIN if not already defined
 #ifndef LED_BUILTIN
-#define LED_BUILTIN 2  // Most ESP32 boards use GPIO 2 for built-in LED
+#define LED_BUILTIN 2  // Built-in LED on most ESP32 boards
 #endif
 
 // WiFi Credentials - CHANGE THESE!
-const char* ssid = "Darshana";
-const char* password = "0777802809";
+const char* ssid = "darshana";
+const char* password = "07405950";
 
 // MQTT Configuration - Using HiveMQ public broker
 const char* mqtt_server = "broker.hivemq.com";
@@ -19,6 +19,7 @@ const char* mqtt_status = "noodle_vending/status";
 const char* mqtt_drop = "noodle_vending/drop_detected";
 
 // Stepper Motor Pins (using ULN2003)
+// FIXED: Removed GPIO6-11, GPIO1, GPIO3, using only safe GPIO pins
 #define IN1_1 19
 #define IN2_1 18
 #define IN3_1 5
@@ -26,18 +27,18 @@ const char* mqtt_drop = "noodle_vending/drop_detected";
 
 #define IN1_2 16
 #define IN2_2 4
-#define IN3_2 2
-#define IN4_2 15
+#define IN3_2 15
+#define IN4_2 14
 
 #define IN1_3 13
 #define IN2_3 12
-#define IN3_3 14
-#define IN4_3 27
+#define IN3_3 27
+#define IN4_3 26
 
-#define IN1_4 26
-#define IN2_4 25
-#define IN3_4 33
-#define IN4_4 32
+#define IN1_4 25
+#define IN2_4 33
+#define IN3_4 32
+#define IN4_4 23
 
 // Steps per revolution for 28BYJ-48
 const int STEPS_PER_REV = 2038;
@@ -46,9 +47,17 @@ Stepper stepper2(STEPS_PER_REV, IN1_2, IN3_2, IN2_2, IN4_2);
 Stepper stepper3(STEPS_PER_REV, IN1_3, IN3_3, IN2_3, IN4_3);
 Stepper stepper4(STEPS_PER_REV, IN1_4, IN3_4, IN2_4, IN4_4);
 
+// Ultrasonic Sensor Pins (HC-SR04)
+// FIXED: Using input-capable pins (34, 35 are input-only, perfect for ECHO)
+#define ULTRASONIC_TRIG 21  // Trigger pin (output)
+#define ULTRASONIC_ECHO 35  // Echo pin (input-only, no pull-up needed)
+#define DISTANCE_THRESHOLD 23  // Distance in cm to detect drop
+
 // Communication with Arduino
-#define ARDUINO_RX 34  // ESP32 RX -> Connect to Arduino TX (pin 9)
-#define ARDUINO_TX 35  // ESP32 TX -> Connect to Arduino RX (pin 8)
+// Using Serial2 with proper RX/TX pins
+#define ARDUINO_RX 22  // ESP32 RX2 <- Arduino TX
+#define ARDUINO_TX 21  // ESP32 TX2 -> Arduino RX
+// NOTE: If pin 21 conflicts with ultrasonic, use different pins for Serial2
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -62,9 +71,47 @@ bool mqttInitialized = false;
 int mqttConnectionAttempts = 0;
 const int MAX_MQTT_ATTEMPTS = 10;
 
+// Function to measure distance using HC-SR04 ultrasonic sensor
+float getUltrasonicDistance() {
+  // Send trigger pulse
+  digitalWrite(ULTRASONIC_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASONIC_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(ULTRASONIC_TRIG, LOW);
+  
+  // Measure echo time
+  long duration = pulseIn(ULTRASONIC_ECHO, HIGH, 30000);  // 30ms timeout
+  
+  // Calculate distance (speed of sound = 343 m/s at room temperature)
+  float distance = (duration * 0.0343) / 2;
+  
+  return distance;
+}
+
+// Function to detect drop using ultrasonic sensor
+bool detectDropWithUltrasonic() {
+  float distance = getUltrasonicDistance();
+  Serial.print("📏 Ultrasonic Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+  
+  // If distance is less than threshold, drop has been detected
+  if (distance > 0 && distance < DISTANCE_THRESHOLD) {
+    Serial.println("✅ DROP DETECTED!");
+    return true;
+  }
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial2.begin(9600, SERIAL_8N1, ARDUINO_RX, ARDUINO_TX);
+  
+  // Initialize ultrasonic sensor pins
+  pinMode(ULTRASONIC_TRIG, OUTPUT);
+  pinMode(ULTRASONIC_ECHO, INPUT);
+  // Note: GPIO35 is input-only, no need for INPUT_PULLUP
   
   // Initialize stepper motor speeds (slower for better control)
   stepper1.setSpeed(8);
@@ -109,7 +156,7 @@ void setupWiFi() {
   WiFi.persistent(true);
   
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) { // Increased timeout
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(500);
     Serial.print(".");
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
@@ -129,7 +176,6 @@ void setupWiFi() {
     Serial.println("");
     Serial.println("❌ WiFi connection failed!");
     digitalWrite(LED_BUILTIN, LOW);
-    // Still continue - maybe we can work offline
   }
 }
 
@@ -138,10 +184,7 @@ void setupMQTT() {
   mqttClient.setCallback(mqttCallback);
   mqttClient.setKeepAlive(60);
   mqttClient.setSocketTimeout(30);
-  mqttClient.setBufferSize(2048); // Increase buffer size for stability
-  
-  // Set last will message
-  mqttClient.setWill(mqtt_status, "disconnected", 1, true);
+  mqttClient.setBufferSize(2048);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -162,7 +205,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void handleCommand(String cmd) {
+  Serial.println("=== COMMAND RECEIVED ===");
+  Serial.print("Timestamp: ");
+  Serial.println(millis());
+  Serial.print("Command: ");
+  Serial.println(cmd);
+  Serial.print("Device busy: ");
+  Serial.println(dispensing ? "YES" : "NO");
+  
   if (dispensing) {
+    Serial.println("❌ Device is busy, rejecting command");
     mqttPublish(mqtt_status, "busy");
     mqttPublish("noodle_vending/log", "Rejected - Currently busy");
     return;
@@ -264,14 +316,20 @@ void dispenseNoodle(int noodleNumber) {
   dropDetectedFlag = false;
   heatingCompleteFlag = false;
   
-  Serial.println("Dispensing Noodle " + String(noodleNumber));
+  Serial.println("\n====== DISPENSING SEQUENCE START ======");
+  Serial.print("Noodle Number: ");
+  Serial.println(noodleNumber);
+  Serial.print("Start Time: ");
+  Serial.println(millis());
+  
+  Serial.println("🍜 Dispensing Noodle " + String(noodleNumber));
   mqttPublish(mqtt_status, "dispensing_noodle_" + String(noodleNumber));
   mqttPublish("noodle_vending/log", "Dispensing noodle " + String(noodleNumber));
   
   // Activate corresponding stepper motor
   switch (noodleNumber) {
     case 1:
-      stepper1.step(STEPS_PER_REV / 2); // Half revolution for dispensing
+      stepper1.step(STEPS_PER_REV / 2);
       break;
     case 2:
       stepper2.step(STEPS_PER_REV / 2);
@@ -290,26 +348,19 @@ void dispenseNoodle(int noodleNumber) {
   Serial2.println("DISPENSING");
   Serial.println("Sent: DISPENSING to Arduino");
   
-  // Wait for drop detection (timeout after 15 seconds)
+  // Wait for drop detection using ultrasonic sensor (timeout after 15 seconds)
   unsigned long startTime = millis();
   bool dropDetected = false;
   
   while (millis() - startTime < 15000) {
-    // Check for response from Arduino
-    if (Serial2.available()) {
-      String response = Serial2.readStringUntil('\n');
-      response.trim();
-      Serial.println("Arduino: " + response);
-      
-      if (response == "DROP_DETECTED") {
-        dropDetected = true;
-        mqttPublish(mqtt_drop, "success_noodle_" + String(noodleNumber));
-        mqttPublish("noodle_vending/log", "Drop detected for noodle " + String(noodleNumber));
-        break;
-      }
+    if (detectDropWithUltrasonic()) {
+      dropDetected = true;
+      mqttPublish(mqtt_drop, "success_noodle_" + String(noodleNumber));
+      mqttPublish("noodle_vending/log", "Drop detected for noodle " + String(noodleNumber));
+      Serial.println("✅ Noodle drop confirmed by ultrasonic sensor!");
+      break;
     }
     
-    // Also check MQTT for emergency stop
     mqttClient.loop();
     delay(100);
   }
@@ -325,7 +376,7 @@ void dispenseNoodle(int noodleNumber) {
     startTime = millis();
     bool heatingComplete = false;
     
-    while (millis() - startTime < 660000) { // 11 minutes
+    while (millis() - startTime < 660000) {
       if (Serial2.available()) {
         String response = Serial2.readStringUntil('\n');
         response.trim();
@@ -368,18 +419,14 @@ void dispenseNoodle(int noodleNumber) {
 }
 
 void mqttPublish(const char* topic, String message) {
-  // Try to reconnect if not connected
   if (!mqttClient.connected()) {
     Serial.println("⚠️ MQTT not connected, attempting to reconnect...");
     if (!reconnectMQTT()) {
       Serial.println("❌ Failed to reconnect MQTT for publish");
-      // Still try to publish - sometimes it works even if not connected
     }
   }
   
-  // Always try to publish, even if not connected
-  // The client will handle reconnection internally
-  bool success = mqttClient.publish(topic, message.c_str(), true); // retained = true
+  bool success = mqttClient.publish(topic, message.c_str(), true);
   if (success) {
     Serial.println("✅ Published to " + String(topic) + ": " + message);
   } else {
@@ -404,23 +451,32 @@ bool reconnectMQTT() {
   
   Serial.print("🔗 Attempting MQTT connection...");
   
-  // Create a client ID with MAC address for uniqueness
   String clientId = "ESP32-NoodleVending-";
   clientId += String(WiFi.macAddress());
   
-  // Try to connect with 5 second timeout
-  bool connected = mqttClient.connect(clientId.c_str());
+  bool connected = false;
+  
+  connected = mqttClient.connect(
+    clientId.c_str(),
+    mqtt_status,
+    1,
+    true,
+    "disconnected"
+  );
+  
+  if (!connected) {
+    Serial.println("First attempt failed, trying simple connection...");
+    connected = mqttClient.connect(clientId.c_str());
+  }
   
   if (connected) {
     Serial.println("✅ connected");
-    mqttConnectionAttempts = 0; // Reset counter on success
+    mqttConnectionAttempts = 0;
     mqttClient.subscribe(mqtt_topic);
     
-    // Publish connection success
-    mqttClient.publish(mqtt_status, "ready", true); // retained
+    mqttClient.publish(mqtt_status, "ready", true);
     mqttClient.publish("noodle_vending/log", "MQTT connected successfully");
     
-    // Blink LED to indicate connection
     for (int i = 0; i < 3; i++) {
       digitalWrite(LED_BUILTIN, LOW);
       delay(100);
@@ -439,15 +495,13 @@ bool reconnectMQTT() {
 }
 
 void loop() {
-  // Check WiFi connection
   static unsigned long lastWiFiCheck = 0;
-  if (millis() - lastWiFiCheck > 10000) { // Check WiFi every 10 seconds
+  if (millis() - lastWiFiCheck > 10000) {
     lastWiFiCheck = millis();
     if (WiFi.status() != WL_CONNECTED) {
       Serial.println("⚠️ WiFi disconnected, attempting to reconnect...");
       digitalWrite(LED_BUILTIN, LOW);
       
-      // Try to reconnect WiFi
       WiFi.disconnect();
       delay(100);
       WiFi.reconnect();
@@ -466,16 +520,14 @@ void loop() {
     }
   }
   
-  // Check MQTT connection
   if (!mqttClient.connected()) {
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Blink LED when MQTT disconnected
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
     reconnectMQTT();
   } else {
-    digitalWrite(LED_BUILTIN, HIGH); // Solid LED when connected
+    digitalWrite(LED_BUILTIN, HIGH);
     mqttClient.loop();
   }
   
-  // Check for messages from Arduino
   if (Serial2.available()) {
     String message = Serial2.readStringUntil('\n');
     message.trim();
@@ -493,6 +545,5 @@ void loop() {
     }
   }
   
-  // Small delay to prevent watchdog timer issues
   delay(10);
 }

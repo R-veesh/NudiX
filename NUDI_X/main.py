@@ -39,6 +39,7 @@ device_status = "disconnected"
 last_status_update = None
 system_logs = []
 active_connections = []
+serial_logs = []  # Store serial monitor output
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
@@ -83,6 +84,10 @@ def on_message(client, userdata, msg):
         elif topic == MQTT_TOPIC_LOG:
             add_log("SYSTEM", payload)
             
+        # Capture all serial output from ESP32 (any topic containing debug/serial info)
+        if any(x in payload for x in ["✅", "❌", "📨", "📡", "📏", "🍜", "⚠️", "Dispensing", "Distance:", "DROP", "connected"]):
+            add_serial_log(payload)
+            
     except Exception as e:
         logger.error(f"Error processing MQTT message: {e}")
 
@@ -102,6 +107,19 @@ def add_log(log_type, message):
             connection.put_nowait(log_entry)
         except:
             pass
+
+def add_serial_log(message):
+    """Add serial monitor output"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    serial_entry = f"[{timestamp}] {message}"
+    serial_logs.append(serial_entry)
+    
+    # Keep only last 100 serial logs
+    if len(serial_logs) > 100:
+        serial_logs.pop(0)
+    
+    # Also add to main logs
+    add_log("SERIAL", message)
 
 def connect_mqtt():
     """Connect to MQTT broker in background thread"""
@@ -264,6 +282,16 @@ def get_logs():
     return {
         "logs": system_logs[-20:],  # Return last 20 logs
         "count": len(system_logs)
+    }
+
+@app.get("/serial-logs")
+def get_serial_logs():
+    """Get ESP32 serial monitor output"""
+    return {
+        "serial_logs": serial_logs[-50:],  # Return last 50 serial logs
+        "count": len(serial_logs),
+        "total_available": len(serial_logs),
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.post("/chat")

@@ -234,34 +234,41 @@ async function sendMessage() {
     const message = input.value.trim();
     if (!message) return;
 
+    console.log("[SEND_MESSAGE] User message:", message);
     addMessage("user", message);
     input.value = "";
     showTypingIndicator();
 
     try {
+        console.log("[SEND_MESSAGE] Sending request to /chat...");
         const response = await fetch("http://127.0.0.1:8000/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ user_message: message })
         });
 
+        console.log("[SEND_MESSAGE] Response status:", response.status);
         if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
         const data = await response.json();
+        console.log("[SEND_MESSAGE] Response data:", data);
         removeTypingIndicator();
         
         let aiResponse = data.reply || "I didn't understand that.";
         
         // Add additional info
         if (data.action) {
+            console.log("[SEND_MESSAGE] Action:", data.action);
             aiResponse += `\n\n⚡ ${data.action}`;
             showNotification(data.action, "success");
         }
         if (data.warning) {
+            console.log("[SEND_MESSAGE] Warning:", data.warning);
             aiResponse += `\n\n⚠️ ${data.warning}`;
             showNotification(data.warning, "warning");
         }
         if (data.error) {
+            console.log("[SEND_MESSAGE] Error:", data.error);
             aiResponse += `\n\n❌ ${data.error}`;
             showNotification(data.error, "error");
         }
@@ -278,7 +285,7 @@ async function sendMessage() {
         }
 
     } catch (error) {
-        console.error("Send error:", error);
+        console.error("[SEND_MESSAGE] ❌ Fetch error:", error);
         removeTypingIndicator();
         addMessage("ai", `❌ Connection Error: ${error.message}\n\nPlease ensure:\n1. FastAPI server is running (uvicorn main:app)\n2. Port 8000 is available\n3. No firewall blocking connections`);
     }
@@ -300,24 +307,34 @@ function quickSelect(noodleNumber) {
 async function manualDispense(noodleNumber) {
     if (deviceStatus !== "ready") {
         showNotification(`Device is ${deviceStatus}. Please wait.`, "warning");
+        console.warn(`[MANUAL_DISPENSE] Device not ready: ${deviceStatus}`);
         return;
     }
     
+    console.log(`[MANUAL_DISPENSE] Starting dispense for noodle ${noodleNumber}`);
+    console.log(`[MANUAL_DISPENSE] Sending request to /manual_dispense/${noodleNumber}`);
+    
     try {
         const response = await fetch(`http://127.0.0.1:8000/manual_dispense/${noodleNumber}`, {
-            method: "POST"
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
         });
         
+        console.log(`[MANUAL_DISPENSE] Response status: ${response.status}`);
         const data = await response.json();
+        console.log(`[MANUAL_DISPENSE] Response data:`, data);
         
         if (data.success) {
             showNotification(`Dispensing noodle ${noodleNumber}...`, "success");
             addMessage("user", `[MANUAL] Dispense noodle ${noodleNumber}`);
             addMessage("ai", `✅ Manual command sent for noodle ${noodleNumber}. Processing...`);
+            console.log(`[MANUAL_DISPENSE] ✅ Command sent successfully: noodle_${noodleNumber}`);
         } else {
             showNotification(`Failed: ${data.message}`, "error");
+            console.error(`[MANUAL_DISPENSE] ❌ Command failed:`, data.message);
         }
     } catch (error) {
+        console.error(`[MANUAL_DISPENSE] ❌ Fetch error:`, error);
         showNotification("Failed to send command", "error");
     }
 }
