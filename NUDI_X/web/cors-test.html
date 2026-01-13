@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CORS Test</title>
+</head>
+<body>
+    <h1>CORS Test</h1>
+    <button onclick="testStatus()">Test /status endpoint</button>
+    <button onclick="testRoot()">Test / endpoint</button>
+    <pre id="output"></pre>
+
+    <script>
+        const output = document.getElementById('output');
+
+        async function testStatus() {
+            output.innerHTML = 'Testing /status...\n';
+            try {
+                const response = await fetch('http://127.0.0.1:8000/status');
+                output.innerHTML += 'Status: ' + response.status + '\n';
+                output.innerHTML += 'Headers:\n';
+                for (const [key, value] of response.headers) {
+                    output.innerHTML += `  ${key}: ${value}\n`;
+                }
+                const data = await response.json();
+                output.innerHTML += 'Data: ' + JSON.stringify(data, null, 2) + '\n';
+            } catch (error) {
+                output.innerHTML += 'ERROR: ' + error.message + '\n' + error.stack;
+            }
+        }
+
+        async function testRoot() {
+            output.innerHTML = 'Testing /...\n';
+            try {
+                const response = await fetch('http://127.0.0.1:8000/');
+                output.innerHTML += 'Status: ' + response.status + '\n';
+                const data = await response.json();
+                output.innerHTML += 'Data: ' + JSON.stringify(data, null, 2) + '\n';
+            } catch (error) {
+                output.innerHTML += 'ERROR: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

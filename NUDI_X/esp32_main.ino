@@ -1,4 +1,4 @@
-// esp32_main.ino
+// esp32_main.ino (FIXED VERSION)
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Stepper.h>
@@ -12,9 +12,8 @@
 const char* ssid = "Darshana";
 const char* password = "0777802809";
 
-// MQTT Configuration
-// Options: broker.emqx.io (public), broker.hivemq.com (public), or your local broker
-const char* mqtt_server = "broker.hivemq.com"; // Using HiveMQ public broker (more reliable)
+// MQTT Configuration - Using HiveMQ public broker
+const char* mqtt_server = "broker.hivemq.com";
 const char* mqtt_topic = "noodle_vending/command";
 const char* mqtt_status = "noodle_vending/status";
 const char* mqtt_drop = "noodle_vending/drop_detected";
@@ -59,6 +58,9 @@ bool dropDetectedFlag = false;
 bool heatingCompleteFlag = false;
 unsigned long lastReconnectAttempt = 0;
 const unsigned long RECONNECT_INTERVAL = 5000;
+bool mqttInitialized = false;
+int mqttConnectionAttempts = 0;
+const int MAX_MQTT_ATTEMPTS = 10;
 
 void setup() {
   Serial.begin(115200);
@@ -79,10 +81,21 @@ void setup() {
   Serial.println("ESP32 Noodle Vending Machine Ready");
   Serial.println("Waiting for commands...");
   
-  // Initial MQTT connection
-  reconnectMQTT();
-  mqttPublish(mqtt_status, "ready");
-  mqttPublish("noodle_vending/log", "ESP32 initialized");
+  // Initial MQTT connection with retry
+  bool mqttConnected = false;
+  for (int i = 0; i < MAX_MQTT_ATTEMPTS; i++) {
+    if (reconnectMQTT()) {
+      mqttConnected = true;
+      break;
+    }
+    delay(1000);
+  }
+  
+  if (mqttConnected) {
+    Serial.println("✅ MQTT connected successfully!");
+  } else {
+    Serial.println("⚠️ MQTT connection failed, continuing with limited functionality");
+  }
 }
 
 void setupWiFi() {
@@ -96,7 +109,7 @@ void setupWiFi() {
   WiFi.persistent(true);
   
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) { // Increased timeout
     delay(500);
     Serial.print(".");
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
@@ -105,14 +118,18 @@ void setupWiFi() {
   
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
+    Serial.println("✅ WiFi connected");
+    Serial.print("📡 IP address: ");
     Serial.println(WiFi.localIP());
+    Serial.print("📶 Signal strength (RSSI): ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
     digitalWrite(LED_BUILTIN, HIGH);
   } else {
     Serial.println("");
-    Serial.println("WiFi connection failed!");
+    Serial.println("❌ WiFi connection failed!");
     digitalWrite(LED_BUILTIN, LOW);
+    // Still continue - maybe we can work offline
   }
 }
 
@@ -121,10 +138,14 @@ void setupMQTT() {
   mqttClient.setCallback(mqttCallback);
   mqttClient.setKeepAlive(60);
   mqttClient.setSocketTimeout(30);
+  mqttClient.setBufferSize(2048); // Increase buffer size for stability
+  
+  // Set last will message
+  mqttClient.setWill(mqtt_status, "disconnected", 1, true);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("MQTT Message [");
+  Serial.print("📨 MQTT Message [");
   Serial.print(topic);
   Serial.print("]: ");
   
@@ -317,7 +338,9 @@ void dispenseNoodle(int noodleNumber) {
       }
       
       // Publish heating status every 30 seconds
-      if (millis() - startTime > 30000 && !heatingComplete) {
+      static unsigned long lastStatus = 0;
+      if (millis() - lastStatus > 30000 && !heatingComplete) {
+        lastStatus = millis();
         long secondsLeft = (660000 - (millis() - startTime)) / 1000;
         mqttPublish("noodle_vending/log", "Heating... " + String(secondsLeft) + "s remaining");
       }
@@ -345,55 +368,102 @@ void dispenseNoodle(int noodleNumber) {
 }
 
 void mqttPublish(const char* topic, String message) {
-  if (mqttClient.connected()) {
-    bool success = mqttClient.publish(topic, message.c_str());
-    if (success) {
-      Serial.println("MQTT Published to " + String(topic) + ": " + message);
-    } else {
-      Serial.println("MQTT Publish failed: " + String(topic));
+  // Try to reconnect if not connected
+  if (!mqttClient.connected()) {
+    Serial.println("⚠️ MQTT not connected, attempting to reconnect...");
+    if (!reconnectMQTT()) {
+      Serial.println("❌ Failed to reconnect MQTT for publish");
+      // Still try to publish - sometimes it works even if not connected
     }
+  }
+  
+  // Always try to publish, even if not connected
+  // The client will handle reconnection internally
+  bool success = mqttClient.publish(topic, message.c_str(), true); // retained = true
+  if (success) {
+    Serial.println("✅ Published to " + String(topic) + ": " + message);
   } else {
-    Serial.println("MQTT not connected, can't publish: " + String(topic));
+    Serial.println("❌ Failed to publish to " + String(topic));
+    Serial.print("MQTT state: ");
+    Serial.println(mqttClient.state());
   }
 }
 
-void reconnectMQTT() {
+bool reconnectMQTT() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected, cannot connect MQTT");
-    return;
+    Serial.println("❌ WiFi not connected, cannot connect MQTT");
+    return false;
   }
   
   unsigned long now = millis();
   if (now - lastReconnectAttempt < RECONNECT_INTERVAL) {
-    return;
+    return mqttClient.connected();
   }
   
   lastReconnectAttempt = now;
   
-  Serial.print("Attempting MQTT connection...");
+  Serial.print("🔗 Attempting MQTT connection...");
   
   // Create a client ID with MAC address for uniqueness
   String clientId = "ESP32-NoodleVending-";
   clientId += String(WiFi.macAddress());
   
-  if (mqttClient.connect(clientId.c_str())) {
-    Serial.println("connected");
+  // Try to connect with 5 second timeout
+  bool connected = mqttClient.connect(clientId.c_str());
+  
+  if (connected) {
+    Serial.println("✅ connected");
+    mqttConnectionAttempts = 0; // Reset counter on success
     mqttClient.subscribe(mqtt_topic);
-    mqttPublish(mqtt_status, "ready");
-    mqttPublish("noodle_vending/log", "MQTT connected successfully");
+    
+    // Publish connection success
+    mqttClient.publish(mqtt_status, "ready", true); // retained
+    mqttClient.publish("noodle_vending/log", "MQTT connected successfully");
+    
+    // Blink LED to indicate connection
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(LED_BUILTIN, LOW);
+      delay(100);
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(100);
+    }
+    return true;
   } else {
-    Serial.print("failed, rc=");
+    mqttConnectionAttempts++;
+    Serial.print("❌ failed, rc=");
     Serial.print(mqttClient.state());
     Serial.println(" try again in 5 seconds");
+    Serial.println("Attempt " + String(mqttConnectionAttempts) + " of " + String(MAX_MQTT_ATTEMPTS));
+    return false;
   }
 }
 
 void loop() {
   // Check WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected, reconnecting...");
-    digitalWrite(LED_BUILTIN, LOW);
-    setupWiFi();
+  static unsigned long lastWiFiCheck = 0;
+  if (millis() - lastWiFiCheck > 10000) { // Check WiFi every 10 seconds
+    lastWiFiCheck = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("⚠️ WiFi disconnected, attempting to reconnect...");
+      digitalWrite(LED_BUILTIN, LOW);
+      
+      // Try to reconnect WiFi
+      WiFi.disconnect();
+      delay(100);
+      WiFi.reconnect();
+      
+      int attempts = 0;
+      while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+      }
+      
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("✅ WiFi reconnected!");
+        digitalWrite(LED_BUILTIN, HIGH);
+      }
+    }
   }
   
   // Check MQTT connection

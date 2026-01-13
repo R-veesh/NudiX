@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Noodle AI Agent - IoT Vending Machine")
 
+# Add CORS middleware immediately after app creation
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # MQTT Configuration - USE SAME BROKER AS ESP32
 MQTT_BROKER = "broker.hivemq.com"  # Public broker, works better than EMQX
 MQTT_PORT = 1883
@@ -33,17 +42,20 @@ active_connections = []
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
-    global mqtt_connected
+    global mqtt_connected, device_status, last_status_update
     if rc == 0:
         logger.info("✅ Connected to MQTT Broker!")
         mqtt_connected = True
+        device_status = "ready"  # Initialize status
+        last_status_update = time.time()  # Set initial timestamp
         client.subscribe(MQTT_TOPIC_STATUS)
         client.subscribe(MQTT_TOPIC_LOG)
-        # Publish initial status request
-        client.publish(MQTT_TOPIC_COMMAND, "status")
+        # Publish initial status
+        client.publish(MQTT_TOPIC_STATUS, "ready", qos=1, retain=True)
     else:
         logger.error(f"❌ Failed to connect to MQTT, return code {rc}")
         mqtt_connected = False
+        device_status = "mqtt_error"
 
 def on_disconnect(client, userdata, rc):
     global mqtt_connected
@@ -133,7 +145,11 @@ def mqtt_publish(topic, message, qos=1):
 # Start MQTT connection on startup
 @app.on_event("startup")
 async def startup_event():
+    global device_status
     logger.info("🚀 Starting Noodle Vending Machine Server...")
+    
+    # Set initial device status
+    device_status = "connecting"
     
     # Connect to MQTT in background
     mqtt_thread = threading.Thread(target=connect_mqtt, daemon=True)
@@ -148,28 +164,14 @@ async def startup_event():
     
     if mqtt_connected:
         logger.info("✅ Server startup complete!")
+        device_status = "ready"
     else:
         logger.warning("⚠️ Server started but MQTT not connected")
+        device_status = "mqtt_disconnected"
+    
+    # Start background status check task
+    asyncio.create_task(status_checker())
 
-# CORS middleware
-origins = [
-    "http://localhost",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "*"  # For development only
-]
-
-app.add_middleware(
-    CORSMiddleware, 
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Pydantic models
 class ChatRequest(BaseModel):
@@ -227,13 +229,35 @@ def read_root():
     }
 
 @app.get("/status")
-def get_status():
-    return {
-        "device_status": device_status,
-        "mqtt_connected": mqtt_connected,
-        "last_update": last_status_update,
-        "timestamp": time.time()
-    }
+async def get_status():
+    """Get current system status"""
+    try:
+        # Calculate time since last update
+        time_since_update = None
+        if last_status_update is not None:
+            try:
+                time_since_update = time.time() - float(last_status_update)
+            except (TypeError, ValueError):
+                time_since_update = None
+        
+        return {
+            "device_status": str(device_status) if device_status else "disconnected",
+            "mqtt_connected": bool(mqtt_connected),
+            "last_update": float(last_status_update) if last_status_update else None,
+            "last_update_seconds_ago": round(time_since_update, 2) if time_since_update is not None else None,
+            "server_time": datetime.now().isoformat(),
+            "system_logs_count": len(system_logs),
+            "status": "ok"
+        }
+    except Exception as e:
+        logger.error(f"Error in /status endpoint: {e}", exc_info=True)
+        return {
+            "device_status": "error",
+            "mqtt_connected": False,
+            "error": str(e),
+            "server_time": datetime.now().isoformat(),
+            "status": "error"
+        }
 
 @app.get("/logs")
 def get_logs():
@@ -292,8 +316,47 @@ async def chat_agent(req: ChatRequest):
             "success": False
         }
 
+@app.post("/manual_dispense/{noodle_number}")
+async def manual_dispense_path(noodle_number: int):
+    """Dispense noodle via path parameter"""
+    try:
+        if 1 <= noodle_number <= 4:
+            command = f"noodle_{noodle_number}"
+            noodle_name = NOODLE_REVERSE_MAP.get(command, f"Noodle {noodle_number}")
+            
+            # Add log
+            add_log("MANUAL", f"Manual dispense: {noodle_name}")
+            
+            if mqtt_publish(MQTT_TOPIC_COMMAND, command):
+                return {
+                    "success": True,
+                    "message": f"Command sent: {command}",
+                    "noodle_name": noodle_name,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "Failed to send command to device",
+                    "timestamp": datetime.now().isoformat()
+                }
+        else:
+            return {
+                "success": False,
+                "message": "Invalid noodle number (must be 1-4)",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in manual dispense: {e}")
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }
+
 @app.post("/manual_dispense")
 async def manual_dispense(req: ManualDispenseRequest):
+    """Dispense noodle via JSON body"""
     try:
         noodle_number = req.noodle_number
         
@@ -376,6 +439,34 @@ async def test_motor(motor_number: int):
             "message": f"Error: {str(e)}"
         }
 
+
+@app.get("/test-cors")
+async def test_cors():
+    return {
+        "message": "CORS test successful",
+        "timestamp": datetime.now().isoformat(),
+        "cors_enabled": True
+    }
+
+@app.get("/debug")
+async def debug_info():
+    """Debug endpoint to check all variables"""
+    return {
+        "device_status": device_status,
+        "device_status_type": type(device_status).__name__,
+        "mqtt_connected": mqtt_connected,
+        "mqtt_connected_type": type(mqtt_connected).__name__,
+        "last_status_update": last_status_update,
+        "last_status_update_type": type(last_status_update).__name__ if last_status_update else "None",
+        "current_time": time.time(),
+        "variables_defined": {
+            "device_status": "device_status" in globals(),
+            "mqtt_connected": "mqtt_connected" in globals(),
+            "last_status_update": "last_status_update" in globals(),
+            "system_logs": "system_logs" in globals(),
+        }
+    }
+
 @app.get("/system_info")
 async def system_info():
     """Get complete system information"""
@@ -407,11 +498,12 @@ async def system_info():
 async def status_checker():
     """Periodically check device status"""
     while True:
-        if mqtt_connected:
-            mqtt_publish(MQTT_TOPIC_COMMAND, "status")
+        try:
+            if mqtt_connected:
+                mqtt_publish(MQTT_TOPIC_COMMAND, "status")
+        except Exception as e:
+            logger.error(f"Error in status checker: {e}")
         await asyncio.sleep(10)  # Check every 10 seconds
 
-# Start background task
-@app.on_event("startup")
-async def start_background_tasks():
-    asyncio.create_task(status_checker())
+
+

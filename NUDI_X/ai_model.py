@@ -6,8 +6,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Use a smaller model for better performance
-MODEL_NAME = "microsoft/DialoGPT-small"  # Smaller and faster than phi-2
+# Smaller and faster than phi-2
 # Alternative: "distilgpt2" or "gpt2" if DialoGPT fails
+MODEL_NAME = "microsoft/DialoGPT-small"  
+
 
 # Cache for responses to improve performance
 response_cache = {}
