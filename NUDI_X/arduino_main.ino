@@ -1,18 +1,16 @@
 // arduino_main.ino
 #include <SoftwareSerial.h>
 
-#define RX_PIN 8   // Arduino RX <- ESP32 TX
-#define TX_PIN 9   // Arduino TX -> ESP32 RX
+#define RX_PIN 8 // Arduino RX <- ESP32 TX
+#define TX_PIN 9 // Arduino TX -> ESP32 RX
 
 // Ultrasonic Sensor Pins (HC-SR04)
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 6
 
-#define RELAY_PIN 7        // Heater / water relay
-#define L298N_IN1 3        // L298N Input 1
-#define L298N_IN2 4        // L298N Input 2
-
-#define BUZZER_PIN 10
+#define RELAY_PIN 7 // Heater / water relay
+#define L298N_IN1 3 // L298N Input 1
+#define L298N_IN2 4 // L298N Input 2
 
 SoftwareSerial espSerial(RX_PIN, TX_PIN);
 
@@ -20,22 +18,22 @@ SoftwareSerial espSerial(RX_PIN, TX_PIN);
 bool waitingForDrop = false;
 bool heatingInProgress = false;
 bool emergencyStopFlag = false;
-bool waterPumpRunning = false;
-bool dropDetected = false;
+
 bool relayActive = false;
 bool l298nMotorActive = false;
 
-unsigned long heatingStartTime = 0;
-unsigned long waterPumpStartTime = 0;
 unsigned long relayStartTime = 0;
 unsigned long l298nStartTime = 0;
 unsigned long lastUltrasonicCheck = 0;
 
-#define DISTANCE_THRESHOLD 23  // cm
-#define ULTRASONIC_CHECK_INTERVAL 200  // Check ultrasonic every 200ms
-#define RELAY_DURATION 600000  // 10 minutes
-#define L298N_DURATION 20000  // 20 seconds
-#define STEPPER_SPIN_INTERVAL 500  // Spin stepper every 500ms during drop detection
+// Config
+#define DISTANCE_THRESHOLD 23 // cm (adjustable)
+#define RELAY_DURATION 600000UL // 10 minutes (ms)
+#define L298N_DURATION 10000UL  // 10 seconds (ms)
+#define DROP_CONFIRM_REQUIRED 3 // require 3 consecutive readings under threshold to confirm drop
+
+int dropConfirmCount = 0;
+unsigned long lastSerialTime = 0;
 
 void setup() {
   pinMode(ULTRASONIC_TRIG, OUTPUT);
@@ -43,22 +41,18 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(L298N_IN1, OUTPUT);
   pinMode(L298N_IN2, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
 
+  // Default OFF
   digitalWrite(RELAY_PIN, LOW);
   digitalWrite(L298N_IN1, LOW);
   digitalWrite(L298N_IN2, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
 
   Serial.begin(9600);
   espSerial.begin(9600);
-
   delay(2000);
 
-  Serial.println("Arduino Noodle Vending Ready");
+  Serial.println("=== Arduino Noodle Vending Ready ===");
   espSerial.println("ARDUINO_READY");
-
-  beep(100);
 
   Serial.println("=== Arduino Configuration ===");
   Serial.println("RX Pin: 8");
@@ -68,59 +62,60 @@ void setup() {
   Serial.println("Ultrasonic Echo: 6");
   Serial.println("L298N IN1: 3");
   Serial.println("L298N IN2: 4");
-  Serial.println("Buzzer Pin: 10");
 }
 
 void loop() {
+  // Handle incoming commands from ESP32
   if (espSerial.available()) {
     String command = espSerial.readStringUntil('\n');
     command.trim();
+    if (command.length() > 0) {
+      Serial.print("[");
+      Serial.print(millis());
+      Serial.print("] Received command: ");
+      Serial.println(command);
 
-    Serial.print("[");
-    Serial.print(millis());
-    Serial.print("] Received: ");
-    Serial.println(command);
-
-    if (command == "DISPENSING") startDropDetection();
-    else if (command == "START_HEATING") startHeatingProcess();
-    else if (command == "EMERGENCY_STOP") emergencyStop();
+      if (command == "DISPENSING") {
+        if (!emergencyStopFlag) startDropDetection();
+        else {
+          Serial.println("Emergency active - ignoring DISPENSING");
+          espSerial.println("EMERGENCY_ACTIVE");
+        }
+      }
+      else if (command == "START_HEATING") {
+        if (!emergencyStopFlag && !heatingInProgress) startHeatingProcess();
+      }
+      else if (command == "EMERGENCY_STOP") {
+        emergencyStop();
+      }
+      else if (command == "RESET") {
+        // clear emergency flag
+        emergencyStopFlag = false;
+        Serial.println("[RESET] Emergency flag cleared");
+        espSerial.println("RESET_DONE");
+      }
+    }
   }
 
+  // Drop detection loop (non-blocking)
   if (waitingForDrop && !emergencyStopFlag) {
     checkDropDetection();
   }
 
-  if (dropDetected && !heatingInProgress) {
-    // After drop is detected, start heating process automatically
-    if (millis() > lastUltrasonicCheck + 1000) {
-      startHeatingProcess();
-      dropDetected = false;
-    }
-  }
-
+  // Heating/pump motor management (non-blocking)
   if (heatingInProgress && !emergencyStopFlag) {
     handleHeatingProcess();
   }
 
-  delay(50);
+  // small idle delay
+  delay(30);
 }
 
 void startDropDetection() {
   waitingForDrop = true;
-  dropDetected = false;
-  lastUltrasonicCheck = millis();
-
+  dropConfirmCount = 0;
   Serial.println("\n========== NOODLE DROP DETECTION STARTED ==========");
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] Waiting for noodle drop...");
-  Serial.println("Stepper motor spinning continuously...");
-  
   espSerial.println("WAITING_FOR_DROP");
-
-  beep(100);
-  delay(200);
-  beep(100);
 }
 
 float getUltrasonicDistance() {
@@ -130,39 +125,41 @@ float getUltrasonicDistance() {
   delayMicroseconds(10);
   digitalWrite(ULTRASONIC_TRIG, LOW);
 
-  long duration = pulseIn(ULTRASONIC_ECHO, HIGH, 30000);
-  return (duration * 0.0343) / 2;
+  long duration = pulseIn(ULTRASONIC_ECHO, HIGH, 30000); // 30 ms timeout
+  if (duration == 0) return -1.0;
+  return (duration * 0.0343) / 2.0;
 }
 
 void checkDropDetection() {
   unsigned long now = millis();
-  
-  // Check ultrasonic sensor at intervals
-  if (now - lastUltrasonicCheck < ULTRASONIC_CHECK_INTERVAL) {
-    return;
-  }
-  
-  lastUltrasonicCheck = now;
-  float distance = getUltrasonicDistance();
 
+  float distance = getUltrasonicDistance();
   Serial.print("[");
   Serial.print(now);
   Serial.print("] Distance: ");
-  Serial.print(distance);
-  Serial.println(" cm");
+  if (distance < 0) {
+    Serial.println("timeout");
+    dropConfirmCount = 0; // reset confirmation on bad reading
+    return;
+  } else {
+    Serial.println(distance);
+  }
 
+  // require N consecutive readings below threshold to confirm
   if (distance > 0 && distance < DISTANCE_THRESHOLD) {
-    Serial.println("\n========== NOODLE DROP DETECTED! ==========");
-    Serial.print("[");
-    Serial.print(millis());
-    Serial.println("] Drop confirmed by ultrasonic sensor!");
-    
-    waitingForDrop = false;
-    dropDetected = true;
-
-    espSerial.println("DROP_DETECTED");
-    beep(300);
-    delay(500);
+    dropConfirmCount++;
+    Serial.print("  dropConfirmCount: ");
+    Serial.println(dropConfirmCount);
+    if (dropConfirmCount >= DROP_CONFIRM_REQUIRED) {
+      Serial.println("NOODLE DROP DETECTED");
+      waitingForDrop = false;
+      dropConfirmCount = 0;
+      espSerial.println("DROP_DETECTED");
+      // Immediately start heating when drop is detected
+      startHeatingProcess();
+    }
+  } else {
+    dropConfirmCount = 0;
   }
 }
 
@@ -170,133 +167,63 @@ void startHeatingProcess() {
   heatingInProgress = true;
   relayActive = true;
   l298nMotorActive = true;
-  
-  heatingStartTime = millis();
   relayStartTime = millis();
   l298nStartTime = millis();
 
-  Serial.println("\n========== HEATING PROCESS STARTED ==========");
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] Activating heating components...");
-  
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] ✓ RELAY (Heater) turned ON for 10 minutes");
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] ✓ L298N Motor Driver turned ON for 20 seconds");
-
-  espSerial.println("HEATING_STARTED");
-
-  // Relay ON (Heater)
   digitalWrite(RELAY_PIN, HIGH);
 
-  // L298N Motor ON (Pump)
+  // L298N forward
   digitalWrite(L298N_IN1, HIGH);
   digitalWrite(L298N_IN2, LOW);
 
-  beep(100);
-  delay(100);
-  beep(100);
+  Serial.println("HEATING STARTED");
+  Serial.print("[");
+  Serial.print(millis());
+  Serial.println("] Relay ON, L298N motor ON (10s motor / 10min relay)");
+  espSerial.println("HEATING_STARTED");
 }
 
 void handleHeatingProcess() {
   unsigned long now = millis();
-  unsigned long relayElapsed = now - relayStartTime;
   unsigned long l298nElapsed = now - l298nStartTime;
+  unsigned long relayElapsed = now - relayStartTime;
 
-  // Check and display relay status every 10 seconds
-  static unsigned long lastRelayStatus = 0;
-  if (now - lastRelayStatus > 10000) {
-    lastRelayStatus = now;
-    unsigned long relayRemaining = RELAY_DURATION - relayElapsed;
-    Serial.print("[");
-    Serial.print(now);
-    Serial.print("] RELAY Status: ON | Remaining: ");
-    Serial.print(relayRemaining / 1000);
-    Serial.println(" seconds");
-  }
-
-  // Check and display L298N motor status every 5 seconds
-  static unsigned long lastL298nStatus = 0;
-  if (now - lastL298nStatus > 5000) {
-    lastL298nStatus = now;
-    unsigned long l298nRemaining = L298N_DURATION - l298nElapsed;
-    Serial.print("[");
-    Serial.print(now);
-    Serial.print("] L298N Motor Status: ON | Remaining: ");
-    Serial.print(l298nRemaining / 1000);
-    Serial.println(" seconds");
-  }
-
-  // Turn off L298N motor after 20 seconds
-  if (l298nMotorActive && l298nElapsed > L298N_DURATION) {
+  if (l298nMotorActive && l298nElapsed >= L298N_DURATION) {
     l298nMotorActive = false;
     digitalWrite(L298N_IN1, LOW);
     digitalWrite(L298N_IN2, LOW);
-    
-    Serial.println("\n========== L298N MOTOR STOPPED ==========");
     Serial.print("[");
-    Serial.print(millis());
-    Serial.println("] ✓ L298N Motor turned OFF after 20 seconds");
+    Serial.print(now);
+    Serial.print("] Pump stopped (L298N OFF) after ");
+    Serial.print(l298nElapsed);
+    Serial.println("ms");
   }
 
-  // Turn off relay after 10 minutes
-  if (relayActive && relayElapsed > RELAY_DURATION) {
+  if (relayActive && relayElapsed >= RELAY_DURATION) {
     relayActive = false;
     digitalWrite(RELAY_PIN, LOW);
-    
-    Serial.println("\n========== RELAY STOPPED ==========");
     Serial.print("[");
-    Serial.print(millis());
-    Serial.println("] ✓ RELAY (Heater) turned OFF after 10 minutes");
+    Serial.print(now);
+    Serial.print("] Heater OFF (relay duration complete) after ");
+    Serial.print(relayElapsed);
+    Serial.println("ms");
   }
 
-  // End heating process when both are done
   if (!relayActive && !l298nMotorActive) {
     stopHeatingProcess();
   }
 }
 
-void stopWaterPump() {
-  waterPumpRunning = false;
-  digitalWrite(L298N_IN1, LOW);
-  digitalWrite(L298N_IN2, LOW);
-  
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] Water pump stopped");
-}
-
 void stopHeatingProcess() {
   heatingInProgress = false;
-  relayActive = false;
-  l298nMotorActive = false;
-
   digitalWrite(RELAY_PIN, LOW);
   digitalWrite(L298N_IN1, LOW);
   digitalWrite(L298N_IN2, LOW);
-
-  Serial.println("\n========== HEATING PROCESS COMPLETED ==========");
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] All heating components turned OFF");
-
+  Serial.println("HEATING COMPLETE");
   espSerial.println("HEATING_COMPLETE");
-
-  for (int i = 0; i < 3; i++) {
-    beep(100);
-    delay(100);
-  }
 }
 
 void emergencyStop() {
-  Serial.println("\n========== EMERGENCY STOP ACTIVATED ==========");
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.println("] All operations halted!");
-
   emergencyStopFlag = true;
   waitingForDrop = false;
   heatingInProgress = false;
@@ -307,20 +234,7 @@ void emergencyStop() {
   digitalWrite(L298N_IN1, LOW);
   digitalWrite(L298N_IN2, LOW);
 
+  Serial.println("EMERGENCY STOP - all outputs OFF");
   espSerial.println("EMERGENCY_STOPPED");
-
-  for (int i = 0; i < 5; i++) {
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(100);
-    digitalWrite(BUZZER_PIN, LOW);
-    delay(100);
-  }
-
-  emergencyStopFlag = false;
-}
-
-void beep(int duration) {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(duration);
-  digitalWrite(BUZZER_PIN, LOW);
+  // emergencyStopFlag remains true until a RESET command is received
 }
