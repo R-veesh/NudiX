@@ -1,4 +1,4 @@
-// esp32_main.ino (CORRECTED PIN ASSIGNMENTS)
+// esp32_main.ino (FIXED - Motor Driver Overheating Issue)
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Stepper.h>
@@ -79,6 +79,9 @@ void setup() {
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
+
+  // De-energize all steppers on startup to prevent heating
+  deEnergizeAllSteppers();
 
   setupWiFi();
   setupMQTT();
@@ -208,9 +211,17 @@ void deEnergizeStepper(int motorNumber) {
   }
 }
 
+void deEnergizeAllSteppers() {
+  Serial.println("De-energizing all stepper motors");
+  for (int i = 1; i <= 4; i++) {
+    deEnergizeStepper(i);
+  }
+}
+
 void testMotor(int motorNumber) {
   Serial.println("Testing motor " + String(motorNumber));
   mqttPublish("noodle_vending/log", "Testing motor " + String(motorNumber));
+  
   switch (motorNumber) {
     case 1:
       stepper1.step(STEPS_PER_REV / 4);
@@ -233,6 +244,10 @@ void testMotor(int motorNumber) {
       stepper4.step(-STEPS_PER_REV / 4);
       break;
   }
+  
+  // CRITICAL FIX: De-energize the motor after testing to prevent overheating
+  deEnergizeStepper(motorNumber);
+  
   mqttPublish("noodle_vending/log", "Motor test complete");
   mqttPublish(mqtt_status, "ready");
 }
@@ -246,8 +261,9 @@ void emergencyStop() {
   Serial2.println("EMERGENCY_STOP");
   Serial.println("Sent to Arduino: \"EMERGENCY_STOP\"");
 
-  // Reset steppers (just set no steps for safety)
-  // (Stepper library doesn't have direct disable; leaving as-is)
+  // CRITICAL FIX: De-energize all steppers to prevent heating
+  deEnergizeAllSteppers();
+  
   delay(200);
   mqttPublish(mqtt_status, "ready");
 }
@@ -283,6 +299,7 @@ void dispenseNoodle(int noodleNumber) {
         Serial.println("\"");
         if (receivedMessage == "DROP_DETECTED") {
           dropDetected = true;
+          // CRITICAL FIX: De-energize motor immediately when drop detected
           deEnergizeStepper(noodleNumber);
           mqttPublish(mqtt_drop, "success_noodle_" + String(noodleNumber));
           mqttPublish("noodle_vending/log", "Drop detected for noodle " + String(noodleNumber));
@@ -290,6 +307,7 @@ void dispenseNoodle(int noodleNumber) {
         } else if (receivedMessage == "EMERGENCY_STOPPED") {
           Serial.println("Arduino reported emergency stop");
           mqttPublish("noodle_vending/log", "Arduino emergency stopped");
+          deEnergizeAllSteppers(); // De-energize on emergency
           dispensing = false;
           mqttPublish(mqtt_status, "ready");
           return;
@@ -316,6 +334,8 @@ void dispenseNoodle(int noodleNumber) {
     Serial.println("DROP DETECTION TIMEOUT");
     mqttPublish(mqtt_drop, "timeout_noodle_" + String(noodleNumber));
     mqttPublish("noodle_vending/log", "Drop timeout for noodle " + String(noodleNumber));
+    // CRITICAL FIX: De-energize motor on timeout
+    deEnergizeStepper(noodleNumber);
     dispensing = false;
     mqttPublish(mqtt_status, "ready");
     return;
@@ -344,6 +364,7 @@ void dispenseNoodle(int noodleNumber) {
         } else if (response == "EMERGENCY_STOPPED") {
           Serial.println("Arduino reported emergency stop during heating");
           mqttPublish("noodle_vending/log", "Emergency during heating");
+          deEnergizeAllSteppers(); // De-energize on emergency
           dispensing = false;
           mqttPublish(mqtt_status, "ready");
           return;
@@ -478,6 +499,7 @@ void loop() {
         mqttPublish("noodle_vending/log", "Arduino connected and ready");
       } else if (message == "EMERGENCY_STOPPED") {
         mqttPublish("noodle_vending/log", "Arduino emergency stopped");
+        deEnergizeAllSteppers(); // De-energize on emergency
         dispensing = false;
         mqttPublish(mqtt_status, "ready");
       }
