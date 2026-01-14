@@ -8,6 +8,7 @@
 #define LED_BUILTIN 2  // Built-in LED on most ESP32 boards
 #endif
 
+
 // WiFi Credentials - CHANGE THESE!
 const char* ssid = "darshana";
 const char* password = "07405950";
@@ -47,17 +48,10 @@ Stepper stepper2(STEPS_PER_REV, IN1_2, IN3_2, IN2_2, IN4_2);
 Stepper stepper3(STEPS_PER_REV, IN1_3, IN3_3, IN2_3, IN4_3);
 Stepper stepper4(STEPS_PER_REV, IN1_4, IN3_4, IN2_4, IN4_4);
 
-// Ultrasonic Sensor Pins (HC-SR04)
-// FIXED: Using input-capable pins (34, 35 are input-only, perfect for ECHO)
-#define ULTRASONIC_TRIG 21  // Trigger pin (output)
-#define ULTRASONIC_ECHO 35  // Echo pin (input-only, no pull-up needed)
-#define DISTANCE_THRESHOLD 23  // Distance in cm to detect drop
-
 // Communication with Arduino
 // Using Serial2 with proper RX/TX pins
 #define ARDUINO_RX 22  // ESP32 RX2 <- Arduino TX
 #define ARDUINO_TX 21  // ESP32 TX2 -> Arduino RX
-// NOTE: If pin 21 conflicts with ultrasonic, use different pins for Serial2
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -71,47 +65,18 @@ bool mqttInitialized = false;
 int mqttConnectionAttempts = 0;
 const int MAX_MQTT_ATTEMPTS = 10;
 
-// Function to measure distance using HC-SR04 ultrasonic sensor
-float getUltrasonicDistance() {
-  // Send trigger pulse
-  digitalWrite(ULTRASONIC_TRIG, LOW);
-  delayMicroseconds(2);
-  digitalWrite(ULTRASONIC_TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(ULTRASONIC_TRIG, LOW);
-  
-  // Measure echo time
-  long duration = pulseIn(ULTRASONIC_ECHO, HIGH, 30000);  // 30ms timeout
-  
-  // Calculate distance (speed of sound = 343 m/s at room temperature)
-  float distance = (duration * 0.0343) / 2;
-  
-  return distance;
-}
 
-// Function to detect drop using ultrasonic sensor
-bool detectDropWithUltrasonic() {
-  float distance = getUltrasonicDistance();
-  Serial.print("📏 Ultrasonic Distance: ");
-  Serial.print(distance);
-  Serial.println(" cm");
-  
-  // If distance is less than threshold, drop has been detected
-  if (distance > 0 && distance < DISTANCE_THRESHOLD) {
-    Serial.println("✅ DROP DETECTED!");
-    return true;
-  }
-  return false;
-}
 
 void setup() {
   Serial.begin(115200);
   Serial2.begin(9600, SERIAL_8N1, ARDUINO_RX, ARDUINO_TX);
   
-  // Initialize ultrasonic sensor pins
-  pinMode(ULTRASONIC_TRIG, OUTPUT);
-  pinMode(ULTRASONIC_ECHO, INPUT);
-  // Note: GPIO35 is input-only, no need for INPUT_PULLUP
+  delay(500);
+  Serial.println("\n\n=== ESP32 Noodle Vending Machine Starting ===");
+  Serial.println("Serial2 initialized for Arduino communication");
+  Serial.print("Serial2 Baud Rate: 9600");
+  Serial.print(" | RX Pin: 22 | TX Pin: 21");
+  Serial.println("\n");
   
   // Initialize stepper motor speeds (slower for better control)
   stepper1.setSpeed(8);
@@ -285,6 +250,7 @@ void emergencyStop() {
   
   // Send emergency stop to Arduino
   Serial2.println("EMERGENCY_STOP");
+  Serial.println("[" + String(millis()) + "] Sent to Arduino: \"EMERGENCY_STOP\"");
   
   // Reset all steppers
   digitalWrite(IN1_1, LOW);
@@ -317,82 +283,107 @@ void dispenseNoodle(int noodleNumber) {
   heatingCompleteFlag = false;
   
   Serial.println("\n====== DISPENSING SEQUENCE START ======");
-  Serial.print("Noodle Number: ");
+  Serial.print("[");
+  Serial.print(millis());
+  Serial.print("] Noodle Number: ");
   Serial.println(noodleNumber);
-  Serial.print("Start Time: ");
-  Serial.println(millis());
   
   Serial.println("🍜 Dispensing Noodle " + String(noodleNumber));
   mqttPublish(mqtt_status, "dispensing_noodle_" + String(noodleNumber));
   mqttPublish("noodle_vending/log", "Dispensing noodle " + String(noodleNumber));
   
-  // Activate corresponding stepper motor
-  switch (noodleNumber) {
-    case 1:
-      stepper1.step(STEPS_PER_REV / 2);
-      break;
-    case 2:
-      stepper2.step(STEPS_PER_REV / 2);
-      break;
-    case 3:
-      stepper3.step(STEPS_PER_REV / 2);
-      break;
-    case 4:
-      stepper4.step(STEPS_PER_REV / 2);
-      break;
-  }
-  
-  delay(100);
-  
   // Signal Arduino to prepare for drop detection
   Serial2.println("DISPENSING");
-  Serial.println("Sent: DISPENSING to Arduino");
+  Serial.println("[" + String(millis()) + "] Sent to Arduino: \"DISPENSING\"");
   
-  // Wait for drop detection using ultrasonic sensor (timeout after 15 seconds)
+  // Continuously spin stepper motor until drop is detected
   unsigned long startTime = millis();
   bool dropDetected = false;
+  int spinCount = 0;
   
-  while (millis() - startTime < 15000) {
-    if (detectDropWithUltrasonic()) {
-      dropDetected = true;
-      mqttPublish(mqtt_drop, "success_noodle_" + String(noodleNumber));
-      mqttPublish("noodle_vending/log", "Drop detected for noodle " + String(noodleNumber));
-      Serial.println("✅ Noodle drop confirmed by ultrasonic sensor!");
-      break;
+  Serial.println("[" + String(millis()) + "] Starting stepper motor continuous spin...");
+  
+  while (millis() - startTime < 15000 && !dropDetected) {  // 15 second timeout
+    // Check if Arduino has detected drop
+    if (Serial2.available()) {
+      String receivedMessage = Serial2.readStringUntil('\n');
+      receivedMessage.trim();
+      Serial.println("[" + String(millis()) + "] Arduino: \"" + receivedMessage + "\"");
+      
+      if (receivedMessage == "DROP_DETECTED") {
+        dropDetected = true;
+        dropDetectedFlag = true;
+        Serial.println("[" + String(millis()) + "] ✅ Noodle drop confirmed by Arduino!");
+        mqttPublish(mqtt_drop, "success_noodle_" + String(noodleNumber));
+        mqttPublish("noodle_vending/log", "Drop detected for noodle " + String(noodleNumber));
+        break;
+      }
+    }
+    
+    // Spin stepper motor continuously
+    spinCount++;
+    Serial.print("[");
+    Serial.print(millis());
+    Serial.print("] Stepper Motor Spin #");
+    Serial.println(spinCount);
+    
+    switch (noodleNumber) {
+      case 1:
+        stepper1.step(100);  // Spin in small increments
+        break;
+      case 2:
+        stepper2.step(100);
+        break;
+      case 3:
+        stepper3.step(100);
+        break;
+      case 4:
+        stepper4.step(100);
+        break;
     }
     
     mqttClient.loop();
-    delay(100);
+    delay(300);  // Small delay between spins
   }
   
   if (dropDetected) {
-    Serial.println("Drop detected successfully!");
+    Serial.println("\n========== DROP DETECTION SUCCESSFUL ==========");
+    Serial.print("[");
+    Serial.print(millis());
+    Serial.print("] Total spins before drop: ");
+    Serial.println(spinCount);
     
-    // Signal Arduino to start heating/water pump
+    // Signal Arduino to start heating/water pump and L298N motor
+    delay(500);
     Serial2.println("START_HEATING");
-    Serial.println("Sent: START_HEATING to Arduino");
+    Serial.println("[" + String(millis()) + "] Sent to Arduino: \"START_HEATING\"");
+    Serial.println("[" + String(millis()) + "] ✓ RELAY (Heater) activated for 10 minutes");
+    Serial.println("[" + String(millis()) + "] ✓ L298N Motor activated for 20 seconds");
     
-    // Wait for completion signal from Arduino (11 minutes max)
+    // Wait for heating to complete (Relay: 10 minutes, L298N Motor: 20 seconds)
+    // Total wait: 10 minutes for relay to finish
     startTime = millis();
     bool heatingComplete = false;
+    unsigned long statusUpdateInterval = millis();
     
-    while (millis() - startTime < 660000) {
+    while (millis() - startTime < 660000 && !heatingComplete) {  // 11 minutes timeout
       if (Serial2.available()) {
         String response = Serial2.readStringUntil('\n');
         response.trim();
-        Serial.println("Arduino: " + response);
+        Serial.println("[" + String(millis()) + "] Arduino: \"" + response + "\"");
         
         if (response == "HEATING_COMPLETE") {
           heatingComplete = true;
+          heatingCompleteFlag = true;
           break;
         }
       }
       
       // Publish heating status every 30 seconds
-      static unsigned long lastStatus = 0;
-      if (millis() - lastStatus > 30000 && !heatingComplete) {
-        lastStatus = millis();
+      if (millis() - statusUpdateInterval > 30000) {
+        statusUpdateInterval = millis();
         long secondsLeft = (660000 - (millis() - startTime)) / 1000;
+        Serial.println("[" + String(millis()) + "] Heating in progress... " + String(secondsLeft) + "s remaining");
         mqttPublish("noodle_vending/log", "Heating... " + String(secondsLeft) + "s remaining");
       }
       
@@ -401,15 +392,21 @@ void dispenseNoodle(int noodleNumber) {
     }
     
     if (heatingComplete) {
-      Serial.println("Heating process completed!");
+      Serial.println("\n========== HEATING PROCESS COMPLETED ==========");
+      Serial.print("[");
+      Serial.print(millis());
+      Serial.println("] Noodle " + String(noodleNumber) + " is ready!");
       mqttPublish("noodle_vending/log", "Noodle " + String(noodleNumber) + " ready!");
     } else {
-      Serial.println("Heating process timeout!");
+      Serial.println("⚠️ Heating process timeout!");
       mqttPublish("noodle_vending/log", "Heating timeout for noodle " + String(noodleNumber));
     }
     
   } else {
-    Serial.println("Drop detection timeout!");
+    Serial.println("\n========== DROP DETECTION TIMEOUT ==========");
+    Serial.print("[");
+    Serial.print(millis());
+    Serial.println("] Failed to detect noodle drop within 15 seconds!");
     mqttPublish(mqtt_drop, "timeout_noodle_" + String(noodleNumber));
     mqttPublish("noodle_vending/log", "Drop timeout for noodle " + String(noodleNumber));
   }
@@ -531,7 +528,13 @@ void loop() {
   if (Serial2.available()) {
     String message = Serial2.readStringUntil('\n');
     message.trim();
-    Serial.println("From Arduino: " + message);
+    
+    // Debug output
+    Serial.print("[");
+    Serial.print(millis());
+    Serial.print("] Received from Arduino: \"");
+    Serial.print(message);
+    Serial.println("\"");
     
     if (message == "DROP_DETECTED") {
       dropDetectedFlag = true;
@@ -542,6 +545,9 @@ void loop() {
       mqttPublish("noodle_vending/log", "Arduino emergency stopped");
       dispensing = false;
       mqttPublish(mqtt_status, "ready");
+    } else if (message == "ARDUINO_READY") {
+      Serial.println("✅ Arduino is ready!");
+      mqttPublish("noodle_vending/log", "Arduino connected and ready");
     }
   }
   
