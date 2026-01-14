@@ -29,7 +29,7 @@ unsigned long lastUltrasonicCheck = 0;
 // Config
 #define DISTANCE_THRESHOLD 23 // cm (adjustable)
 #define RELAY_DURATION 600000UL // 10 minutes (ms)
-#define L298N_DURATION 10000UL  // 10 seconds (ms)
+#define L298N_DURATION 50000UL  // 10 seconds (ms)
 #define DROP_CONFIRM_REQUIRED 3 // require 3 consecutive readings under threshold to confirm drop
 
 int dropConfirmCount = 0;

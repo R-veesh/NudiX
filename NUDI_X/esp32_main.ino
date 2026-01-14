@@ -322,7 +322,7 @@ void dispenseNoodle(int noodleNumber) {
     switch (noodleNumber) {
       case 1: stepper1.step(100); break;
       case 2: stepper2.step(100); break;
-      case 3: stepper3.step(100); break;
+      case 3: stepper3.step(-100); break;
       case 4: stepper4.step(100); break;
       default: break;
     }
