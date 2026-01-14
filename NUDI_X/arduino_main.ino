@@ -43,7 +43,7 @@ void setup() {
   pinMode(L298N_IN2, OUTPUT);
 
   // Default OFF
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, HIGH);
   digitalWrite(L298N_IN1, LOW);
   digitalWrite(L298N_IN2, LOW);
 
@@ -170,7 +170,7 @@ void startHeatingProcess() {
   relayStartTime = millis();
   l298nStartTime = millis();
 
-  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(RELAY_PIN, LOW);
 
   // L298N forward
   digitalWrite(L298N_IN1, HIGH);
@@ -216,7 +216,7 @@ void handleHeatingProcess() {
 
 void stopHeatingProcess() {
   heatingInProgress = false;
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, HIGH);
   digitalWrite(L298N_IN1, LOW);
   digitalWrite(L298N_IN2, LOW);
   Serial.println("HEATING COMPLETE");
@@ -230,7 +230,7 @@ void emergencyStop() {
   relayActive = false;
   l298nMotorActive = false;
 
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, HIGH);
   digitalWrite(L298N_IN1, LOW);
   digitalWrite(L298N_IN2, LOW);
 
