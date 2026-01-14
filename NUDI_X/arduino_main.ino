@@ -154,6 +154,10 @@ void checkDropDetection() {
       Serial.println("NOODLE DROP DETECTED");
       waitingForDrop = false;
       dropConfirmCount = 0;
+      // STOP STEPPER MOTORS IMMEDIATELY WHEN DROP IS DETECTED
+      espSerial.println("STOP_STEPPERS");
+      Serial.println("Sent to ESP32: STOP_STEPPERS");
+      delay(100);
       espSerial.println("DROP_DETECTED");
       // Immediately start heating when drop is detected
       startHeatingProcess();

@@ -491,7 +491,11 @@ void loop() {
       Serial.print("] Received from Arduino: \"");
       Serial.print(message);
       Serial.println("\"");
-      if (message == "DROP_DETECTED") {
+      if (message == "STOP_STEPPERS") {
+        Serial.println("Arduino requested stepper motors to stop");
+        deEnergizeAllSteppers();
+        mqttPublish("noodle_vending/log", "Steppers stopped - drop detected");
+      } else if (message == "DROP_DETECTED") {
         mqttPublish(mqtt_drop, "detected");
       } else if (message == "HEATING_COMPLETE") {
         mqttPublish("noodle_vending/log", "Arduino heating complete");
