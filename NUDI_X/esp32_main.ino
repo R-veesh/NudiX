@@ -331,21 +331,22 @@ void dispenseNoodle(int noodleNumber) {
   }
 
   if (!dropDetected) {
-    Serial.println("DROP DETECTION TIMEOUT");
+    Serial.println("DROP DETECTION TIMEOUT - NO L298N/RELAY ACTIVATION (Ultrasonic sensor did NOT detect drop)");
     mqttPublish(mqtt_drop, "timeout_noodle_" + String(noodleNumber));
-    mqttPublish("noodle_vending/log", "Drop timeout for noodle " + String(noodleNumber));
-    // CRITICAL FIX: De-energize motor on timeout
+    mqttPublish("noodle_vending/log", "Drop timeout for noodle " + String(noodleNumber) + " - L298N & Relay NOT activated");
+    // De-energize motor on timeout
     deEnergizeStepper(noodleNumber);
     dispensing = false;
     mqttPublish(mqtt_status, "ready");
     return;
   }
 
-  // If drop detected, tell Arduino to start heating/pump
+  // ONLY if drop detected by ultrasonic sensor, tell Arduino to start heating/pump
+  // L298N and Relay will ONLY turn ON here, not on timeout
   delay(200);
   Serial2.println("START_HEATING");
-  Serial.println("Sent to Arduino: \"START_HEATING\"");
-  mqttPublish("noodle_vending/log", "START_HEATING sent to Arduino");
+  Serial.println("Sent to Arduino: \"START_HEATING\" - L298N & Relay will now activate (drop confirmed by ultrasonic)");
+  mqttPublish("noodle_vending/log", "START_HEATING sent to Arduino - L298N & Relay activating for noodle " + String(noodleNumber));
 
   // Wait for HEATING_COMPLETE (Arduino will send it when both relay and L298N are finished)
   unsigned long heatStart = millis();
